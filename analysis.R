@@ -4,7 +4,7 @@ library(magrittr)
 # Load data---------------------------------------------------------------------
 get_clean_ph1_data <- function(input_sheet){
   googlesheets4::read_sheet(
-    ss = "https://docs.google.com/spreadsheets/d/172pXBF7x1t0TjiRlPH3G0N4bbjjKg2suki3qdKS1gFw/edit#gid=0",
+    ss = "https://docs.google.com/spreadsheets/d/1pS3TBai5-lu-xYGRImVZ-AZ250Q8lvLwJ7c0hw2EEA4",
     sheet = input_sheet
   ) %>%
     dplyr::rename_all(.funs = stringr::str_to_lower) %>%
@@ -91,7 +91,9 @@ ph1_data <-
       T ~ base::log(.)
     ))
   ) %>%
-  dplyr::mutate(quantity_minus_efficacy = ph1_fc_tot_igg_log - x1_kd_fc_ph1_ha1_log)
+  dplyr::mutate(quantity_minus_efficacy = ph1_fc_tot_igg_log - x1_kd_fc_ph1_ha1_log) %>%
+  dplyr::mutate(ph1_delta_tot_igg = ph1_d14_tot_igg - ph1_d0_tot_igg) %>%
+  dplyr::mutate(one_over_ph1_d0_tot_igg = 1/ph1_d14_tot_igg)
 
 # Check to see if outcomes are correlated with one another----------------------
 stats::cor(
@@ -99,17 +101,10 @@ stats::cor(
     dplyr::select(tidyselect::all_of(ph1_variables[["outcome_clean"]])) %>%
     dplyr::filter_all(.vars_predicate = ~base::is.na(.) == F)
 )
-# Quantity and affinity of antibodies tend to move together.
-# But there are outliers.
-# Is there any clue to those variants that can be explained by those T-cells?
-
-# Note: There are several unmeasured features that create microheterogeneity.
-# We expect some ability to predict, but the bar is not very high.
 
 ph1_pca <- stats::prcomp(
   x = ph1_data %>%
     dplyr::select(tidyselect::all_of(ph1_variables[["outcome_clean"]])) %>%
-    dplyr::mutate_all(.funs = base::log) %>%
     dplyr::filter_all(.vars_predicate = ~base::is.na(.) == F),
   scale. = T)
 base::summary(ph1_pca)
@@ -123,6 +118,11 @@ ph1_mca <- FactoMineR::MCA(
 base::summary(ph1_mca)
 
 # Check to see if numeric predictors are correlated with one another------------
+stats::cor(
+  ph1_data %>%
+    dplyr::select(tidyselect::all_of(ph1_variables[["predictor_numeric_clean"]])) %>%
+    dplyr::filter_all(.vars_predicate = ~base::is.na(.) == F)
+)
 ph1_pca <- stats::prcomp(
   x = ph1_data %>%
     dplyr::select(tidyselect::all_of(ph1_variables[["predictor_numeric_clean"]])) %>%
@@ -177,9 +177,19 @@ for(outcome_i in c(ph1_variables[["outcome_clean"]],"quantity_minus_efficacy")){
 # Is there a ceiling, or is that some of the D0 T-cells actually inhibit the response?
 
 model <- stats::lm(
-  formula = x1_kd_fc_ph1_ha1_log ~ 
+  formula = x1_kd_fc_ph1_ha1 ~ 
     x1_kd_d0_ph1_ha1_log + ph1_d0_elispot_log +
     x1_kd_d0_ph1_ha1_log*ph1_d0_elispot_log,
+  data = ph1_data
+)
+model <- stats::lm(
+  formula = ph1_d14_tot_igg ~ 
+    ph1_d0_tot_igg,
+  data = ph1_data
+)
+model <- stats::lm(
+  formula = ph1_d14_tot_igg ~ 
+    x1_ph1_d0_tot_igg,
   data = ph1_data
 )
 base::summary(model)
@@ -187,7 +197,7 @@ ph1_new_data <-
   tidyr::expand_grid(
     x1_kd_d0_ph1_ha1_log = base::seq(
       from = 0,
-      to = 10,
+      to = 6,
       by = 0.1
     ),
     ph1_d0_elispot_log = base::seq(
@@ -212,10 +222,14 @@ plotly::plot_ly() %>%
                     z = ~x1_kd_fc_ph1_ha1_log_pred,
                     type = "mesh3d")
 
-fig
-library(plotly)
-plot_ly(z = ~xtabs(z ~ x + y, data = df)) %>% add_surface()
-
+plotly::plot_ly(data = ph1_data,
+                x = ~x1_kd_d0_ph1_ha1_log,
+                y = ~ph1_d0_elispot_log,
+                z = ~x1_kd_fc_ph1_ha1_log,
+                marker = list(color = ~x1_kd_d0_ph1_ha1_log, colorscale = c('#683531','#FFE1A1'),
+                              showscale = TRUE)) %>%
+  plotly::add_markers()
+ 
 # We have more types of data for years 1 and 2. More detailed data. I don't
 # know if that will help. If you have missing categories, do you have to
 # analyze those 40 subjects that have all the parameters, or can you analyze
