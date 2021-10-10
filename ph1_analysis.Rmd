@@ -1,0 +1,144 @@
+---
+title: "Ph1 analysis"
+author: "Matt Sant-Miller"
+date: "10/10/2021"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(magrittr)
+```
+
+## Step 1: Clean data
+
+To begin, we perform basic cleaning on the data using the raw data available at 
+[this](https://docs.google.com/spreadsheets/d/1pS3TBai5-lu-xYGRImVZ-AZ250Q8lvLwJ7c0hw2EEA4/edit#gid=949930203)
+Google Sheet.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+# Define function to load data from Google Sheet--------------------------------
+GetCleanPh1Data <- function(input_sheet){
+  googlesheets4::read_sheet(
+    ss = "https://docs.google.com/spreadsheets/d/1pS3TBai5-lu-xYGRImVZ-AZ250Q8lvLwJ7c0hw2EEA4",
+    sheet = input_sheet
+  ) %>%
+    dplyr::rename_all(.funs = stringr::str_to_lower) %>%
+    janitor::clean_names()
+}
+
+# Load and clean variable definitions-------------------------------------------
+ph1_definitions <-
+  GetCleanPh1Data(input_sheet = "variable_definitions") %>%
+  dplyr::filter(status == "Active")
+
+# Create variable subsets-------------------------------------------------------
+ph1_variables <- tibble::lst()
+for(class_i in c("outcome","predictor")){
+  for(status_i in c("clean","raw")){
+    ph1_variables[[base::paste(class_i, status_i, sep = "_")]] <-
+      ph1_definitions %>%
+      dplyr::filter(class == stringr::str_to_sentence(class_i)) %>%
+      purrr::pluck(base::paste(status_i, "name", sep = "_"))
+  }
+}
+for(type_i in c("categorical","numeric")){
+  for(status_i in c("clean","raw")){
+    ph1_variables[[base::paste(type_i, status_i, sep = "_")]] <- 
+      ph1_definitions %>%
+      dplyr::filter(type == stringr::str_to_sentence(type_i)) %>%
+      purrr::pluck(base::paste(status_i, "name", sep = "_"))
+    ph1_variables[[base::paste("predictor", type_i, status_i, sep = "_")]] <- 
+      ph1_definitions %>%
+      dplyr::filter(class == "Predictor", type == stringr::str_to_sentence(type_i)) %>%
+      purrr::pluck(base::paste(status_i, "name", sep = "_"))
+  }
+}
+for(status_i in c("clean","raw")){
+  ph1_variables[[base::paste("log", status_i, sep = "_")]] <-
+    ph1_definitions %>%
+    dplyr::filter(transformation == "Log") %>%
+    purrr::pluck(base::paste(status_i, "name", sep = "_"))
+}
+
+# Load and clean Ph1 data-------------------------------------------------------
+ph1_data <-
+  GetCleanPh1Data(input_sheet = "data") %>%
+  # Clean categorical data
+  dplyr::mutate(
+    prev_season_vacc_status = dplyr::case_when(
+      prev_season_vacc_status == "UKNOWN" | 
+        prev_season_vacc_status == "UNKNOWN" |
+        prev_season_vacc_status == "UnkNOWN" ~ NA_character_,
+      T ~ prev_season_vacc_status
+    )
+  ) %>% dplyr::mutate_at(
+    .vars = ph1_variables[["categorical_raw"]],
+    .funs = base::as.factor
+  ) %>%
+  # Clean numeric data
+  dplyr::mutate_at(
+    .vars = ph1_variables[["log_raw"]],
+    .funs = tibble::lst(log = ~dplyr::case_when(
+      . == 0 ~ 0,
+      T ~ base::log(.)
+    ))
+  ) %>%
+  dplyr::mutate(quantity_minus_efficacy = ph1_fc_tot_igg_log - x1_kd_fc_ph1_ha1_log) %>%
+  dplyr::mutate(ph1_delta_tot_igg = ph1_d14_tot_igg - ph1_d0_tot_igg) %>%
+  dplyr::mutate(one_over_ph1_d0_tot_igg = 1/ph1_d14_tot_igg)
+
+```
+
+## Step 2: Analyze data
+
+To explore the relationship between antibody counts/affinity and CD4 T-Cell counts,
+we run a multivariate regression, predicting fold change in CD4 ELISpot as a function
+of baseline antibody count (total IgG), baseline antibody affinity (1/kd), and the
+interaction between the two measures. Each of these terms are found to be statistically
+significant with 95 percent confidence. We visualize predictive relationships using
+a three-dimensional plot, in which baseline antibody count is on the X-axis, baseline
+antibody affinity is on the Y-axis, and the predicted mean of fold change is plotted
+on the vertical Z-axis. 
+```{r, include = TRUE}
+model <- stats::lm(
+  formula = ph1_fc_elispot_log ~ 
+    x1_kd_d0_ph1_ha1_log + ph1_d0_tot_igg_log +
+    x1_kd_d0_ph1_ha1_log * ph1_d0_tot_igg_log,
+  data = ph1_data
+)
+base::summary(model)
+ph1_new_data <- 
+  tidyr::expand_grid(
+    x1_kd_d0_ph1_ha1_log = base::seq(
+      from = 3,
+      to = 8,
+      by = 0.1
+    ),
+    ph1_d0_tot_igg_log = base::seq(
+      from = 5,
+      to = 10,
+      by = 0.1
+    )
+  )
+model_predictions <-
+  dplyr::bind_cols(
+    ph1_new_data,
+    ph1_fc_elispot_log_pred = stats::predict(
+      object = model,
+      newdata = ph1_new_data
+    )
+  )
+
+plot <-
+  plotly::plot_ly() %>%
+  plotly::add_trace(data = model_predictions,
+                    x = ~x1_kd_d0_ph1_ha1_log,
+                    y = ~ph1_d0_tot_igg_log,
+                    z = ~ph1_fc_elispot_log_pred,
+                    type = "mesh3d")
+plot
+```
