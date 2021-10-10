@@ -98,11 +98,11 @@ ph1_data <-
 To explore the relationship between antibody counts/affinity and CD4 T-Cell counts,
 we run a multivariate regression, predicting fold change in CD4 ELISpot as a function
 of baseline antibody count (total IgG), baseline antibody affinity (1/kd), and the
-interaction between the two measures. Each of these terms are found to be statistically
-significant with 95 percent confidence. We visualize predictive relationships using
-a three-dimensional plot, in which baseline antibody count is on the X-axis, baseline
-antibody affinity is on the Y-axis, and the predicted mean of fold change is plotted
-on the vertical Z-axis. 
+interaction between the two metrics. The regression coefficients on each of these
+terms are found to be statistically significant with 95 percent confidence.
+We visualize these predictive relationships using a three-dimensional plot, in which
+baseline antibody count is on the X-axis, baseline antibody affinity is on the Y-axis
+and the predicted mean of fold change is plotted on the vertical Z-axis.
 ```{r, include = TRUE}
 model <- stats::lm(
   formula = ph1_fc_elispot_log ~ 
