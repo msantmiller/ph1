@@ -2,7 +2,7 @@ base::rm(list = base::ls())
 library(magrittr)
 
 # Load data---------------------------------------------------------------------
-get_clean_ph1_data <- function(input_sheet){
+GetCleanPh1Data <- function(input_sheet){
   googlesheets4::read_sheet(
     ss = "https://docs.google.com/spreadsheets/d/1pS3TBai5-lu-xYGRImVZ-AZ250Q8lvLwJ7c0hw2EEA4",
     sheet = input_sheet
@@ -10,9 +10,9 @@ get_clean_ph1_data <- function(input_sheet){
     dplyr::rename_all(.funs = stringr::str_to_lower) %>%
     janitor::clean_names()
 }
-ph1_data_raw <- get_clean_ph1_data(input_sheet = "data")
+ph1_data_raw <- GetCleanPh1Data(input_sheet = "data")
 ph1_definitions <-
-  get_clean_ph1_data(input_sheet = "variable_definitions") %>%
+  GetCleanPh1Data(input_sheet = "variable_definitions") %>%
   dplyr::filter(status == "Active")
 
 # Create variable subsets-------------------------------------------------------
@@ -175,33 +175,34 @@ for(outcome_i in c(ph1_variables[["outcome_clean"]],"quantity_minus_efficacy")){
 }
 # Observation: D0 T-Cells are negatively correlated with fold change.
 # Is there a ceiling, or is that some of the D0 T-cells actually inhibit the response?
+ph1_data_save <- ph1_data
+ph1_data <- ph1_data %>% dplyr::filter(ph1_fc_elispot_log > 0)
 
 model <- stats::lm(
-  formula = x1_kd_fc_ph1_ha1 ~ 
-    x1_kd_d0_ph1_ha1_log + ph1_d0_elispot_log +
-    x1_kd_d0_ph1_ha1_log*ph1_d0_elispot_log,
+  formula = ph1_fc_elispot_log ~ 
+    x1_kd_d0_ph1_ha1_log + ph1_d0_tot_igg_log + x1_kd_d0_ph1_ha1_log*ph1_d0_tot_igg_log,
   data = ph1_data
 )
-model <- stats::lm(
-  formula = ph1_d14_tot_igg ~ 
-    ph1_d0_tot_igg,
-  data = ph1_data
-)
-model <- stats::lm(
-  formula = ph1_d14_tot_igg ~ 
-    x1_ph1_d0_tot_igg,
-  data = ph1_data
-)
+# model <- stats::lm(
+#   formula = ph1_d14_tot_igg ~ 
+#     ph1_d0_tot_igg,
+#   data = ph1_data
+# )
+# model <- stats::lm(
+#   formula = ph1_d14_tot_igg ~ 
+#     x1_ph1_d0_tot_igg,
+#   data = ph1_data
+# )
 base::summary(model)
 ph1_new_data <- 
   tidyr::expand_grid(
     x1_kd_d0_ph1_ha1_log = base::seq(
-      from = 0,
-      to = 6,
+      from = 3,
+      to = 8,
       by = 0.1
     ),
-    ph1_d0_elispot_log = base::seq(
-      from = 0,
+    ph1_d0_tot_igg_log = base::seq(
+      from = 5,
       to = 10,
       by = 0.1
     )
@@ -209,7 +210,7 @@ ph1_new_data <-
 model_predictions <-
   dplyr::bind_cols(
     ph1_new_data,
-    x1_kd_fc_ph1_ha1_log_pred = stats::predict(
+    ph1_fc_elispot_log_pred = stats::predict(
       object = model,
       newdata = ph1_new_data
     )
@@ -218,17 +219,17 @@ model_predictions <-
 plotly::plot_ly() %>%
   plotly::add_trace(data = model_predictions,
                     x = ~x1_kd_d0_ph1_ha1_log,
-                    y = ~ph1_d0_elispot_log,
-                    z = ~x1_kd_fc_ph1_ha1_log_pred,
+                    y = ~ph1_d0_tot_igg_log,
+                    z = ~ph1_fc_elispot_log_pred,
                     type = "mesh3d")
 
 plotly::plot_ly(data = ph1_data,
                 x = ~x1_kd_d0_ph1_ha1_log,
-                y = ~ph1_d0_elispot_log,
-                z = ~x1_kd_fc_ph1_ha1_log,
-                marker = list(color = ~x1_kd_d0_ph1_ha1_log, colorscale = c('#683531','#FFE1A1'),
+                y = ~ph1_d0_tot_igg_log,
+                z = ~ph1_fc_elispot_log,
+                marker = list(color = ~x1_kd_d0_ph1_ha1_log, colorscale = c('#FFFFFF','#000000'),
                               showscale = TRUE)) %>%
-  plotly::add_markers()
+  plotly::add_markers(inherit = TRUE)
  
 # We have more types of data for years 1 and 2. More detailed data. I don't
 # know if that will help. If you have missing categories, do you have to
